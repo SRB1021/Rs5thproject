@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { DEFAULT_PERSONA } from "../../lib/persona";
 import { loadPersona, savePersona, saveMessages } from "../../lib/storage";
+import { pickBestVoice, sortVoicesByQuality } from "../../lib/voices";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -22,7 +23,14 @@ export default function SettingsPage() {
 
     function loadVoices() {
       const list = window.speechSynthesis.getVoices();
-      if (list.length) setVoices(list);
+      if (!list.length) return;
+      const sorted = sortVoicesByQuality(list);
+      setVoices(sorted);
+      // If no voice has been explicitly chosen yet, default to the best
+      // available American English voice instead of the OS's raw default.
+      setPersona((p) =>
+        p.voiceURI ? p : { ...p, voiceURI: pickBestVoice(sorted)?.voiceURI || null }
+      );
     }
 
     loadVoices();
@@ -156,7 +164,7 @@ export default function SettingsPage() {
                 onChange={(e) => update("voiceURI", e.target.value || null)}
                 className="flex-1 rounded-lg bg-white/10 px-3 py-2 text-[15px] outline-none focus:ring-2 focus:ring-imessage-blue"
               >
-                <option value="">Device default</option>
+                <option value="">Auto (recommended)</option>
                 {voices.map((v) => (
                   <option key={v.voiceURI} value={v.voiceURI}>
                     {v.name} ({v.lang})

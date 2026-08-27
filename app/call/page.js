@@ -5,6 +5,7 @@ import Link from "next/link";
 import { DEFAULT_PERSONA } from "../../lib/persona";
 import { loadPersona, loadMessages, saveMessages } from "../../lib/storage";
 import { fetchReply } from "../../lib/api";
+import { pickBestVoice } from "../../lib/voices";
 
 const STATUS = {
   IDLE: "idle",
@@ -73,7 +74,9 @@ export default function CallPage() {
           return;
         }
         const utterance = new SpeechSynthesisUtterance(text);
-        const voice = voicesRef.current.find((v) => v.voiceURI === persona.voiceURI);
+        const voice =
+          voicesRef.current.find((v) => v.voiceURI === persona.voiceURI) ||
+          pickBestVoice(voicesRef.current);
         if (voice) utterance.voice = voice;
         utterance.onend = resolve;
         utterance.onerror = resolve;
