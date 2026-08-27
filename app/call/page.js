@@ -6,6 +6,7 @@ import { DEFAULT_PERSONA } from "../../lib/persona";
 import { loadPersona, loadMessages, saveMessages } from "../../lib/storage";
 import { fetchReply } from "../../lib/api";
 import { pickBestVoice } from "../../lib/voices";
+import { speakWithElevenLabs } from "../../lib/elevenlabs";
 
 const STATUS = {
   IDLE: "idle",
@@ -66,7 +67,7 @@ export default function CallPage() {
     return () => window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
   }, []);
 
-  const speak = useCallback(
+  const speakWithBrowser = useCallback(
     (text) =>
       new Promise((resolve) => {
         if (typeof window === "undefined" || !("speechSynthesis" in window)) {
@@ -84,6 +85,21 @@ export default function CallPage() {
         window.speechSynthesis.speak(utterance);
       }),
     [persona.voiceURI]
+  );
+
+  const speak = useCallback(
+    async (text) => {
+      if (persona.ttsProvider === "elevenlabs" && persona.elevenlabsVoiceId) {
+        try {
+          await speakWithElevenLabs(text, persona.elevenlabsVoiceId);
+          return;
+        } catch (err) {
+          console.error("ElevenLabs playback failed, falling back to browser voice:", err);
+        }
+      }
+      await speakWithBrowser(text);
+    },
+    [persona.ttsProvider, persona.elevenlabsVoiceId, speakWithBrowser]
   );
 
   const listenOnce = useCallback(() => {
@@ -189,7 +205,7 @@ export default function CallPage() {
     }[status] || "";
 
   return (
-    <div className="mx-auto flex h-screen max-w-lg flex-col items-center justify-between bg-gradient-to-b from-neutral-900 to-black px-6 py-10">
+    <div className="mx-auto flex h-screen max-w-lg flex-col items-center justify-between bg-gradient-to-b from-fuchsia-900 via-indigo-900 to-slate-950 px-6 py-10">
       <div className="w-full">
         <Link href="/" className="text-sm text-white/40">
           ‹ Back to texts

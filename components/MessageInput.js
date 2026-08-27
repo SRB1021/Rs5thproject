@@ -14,7 +14,10 @@ export default function MessageInput({ onSend, disabled }) {
   }
 
   return (
-    <form onSubmit={submit} className="flex items-center gap-2 border-t border-white/10 bg-black p-3">
+    <form
+      onSubmit={submit}
+      className="flex items-center gap-2 border-t border-white/10 bg-black/30 p-3 backdrop-blur-md"
+    >
       <input
         value={value}
         onChange={(e) => setValue(e.target.value)}

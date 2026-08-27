@@ -8,9 +8,6 @@ body {
   overscroll-behavior: none;
 }
 
-body {
-  background: #000;
-}
 
 ::-webkit-scrollbar {
   width: 6px;

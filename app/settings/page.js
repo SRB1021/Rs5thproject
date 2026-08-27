@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { DEFAULT_PERSONA } from "../../lib/persona";
 import { loadPersona, savePersona, saveMessages } from "../../lib/storage";
 import { pickBestVoice, sortVoicesByQuality } from "../../lib/voices";
+import { fetchVoices, speakWithElevenLabs } from "../../lib/elevenlabs";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -13,6 +14,10 @@ export default function SettingsPage() {
   const [persona, setPersona] = useState(DEFAULT_PERSONA);
   const [voices, setVoices] = useState([]);
   const [saved, setSaved] = useState(false);
+  const [elevenVoices, setElevenVoices] = useState([]);
+  const [elevenLoading, setElevenLoading] = useState(false);
+  const [elevenError, setElevenError] = useState("");
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     setPersona(loadPersona(DEFAULT_PERSONA));
@@ -38,6 +43,23 @@ export default function SettingsPage() {
     return () => window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
   }, []);
 
+  useEffect(() => {
+    if (persona.ttsProvider !== "elevenlabs" || elevenVoices.length || elevenLoading) return;
+    setElevenLoading(true);
+    setElevenError("");
+    fetchVoices()
+      .then((list) => {
+        setElevenVoices(list);
+        setPersona((p) =>
+          p.ttsProvider === "elevenlabs" && !p.elevenlabsVoiceId && list.length
+            ? { ...p, elevenlabsVoiceId: list[0].voice_id }
+            : p
+        );
+      })
+      .catch((err) => setElevenError(err.message))
+      .finally(() => setElevenLoading(false));
+  }, [persona.ttsProvider, elevenVoices.length, elevenLoading]);
+
   function update(field, value) {
     setPersona((p) => ({ ...p, [field]: value }));
     setSaved(false);
@@ -52,11 +74,25 @@ export default function SettingsPage() {
     reader.readAsDataURL(file);
   }
 
-  function testVoice() {
+  async function testVoice() {
+    const sample = `hey, it's ${persona.name || "your friend"}. this is what I sound like.`;
+
+    if (persona.ttsProvider === "elevenlabs") {
+      if (!persona.elevenlabsVoiceId) return;
+      setTesting(true);
+      setElevenError("");
+      try {
+        await speakWithElevenLabs(sample, persona.elevenlabsVoiceId);
+      } catch (err) {
+        setElevenError(err.message);
+      } finally {
+        setTesting(false);
+      }
+      return;
+    }
+
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    const utterance = new SpeechSynthesisUtterance(
-      `hey, it's ${persona.name || "your friend"}. this is what I sound like.`
-    );
+    const utterance = new SpeechSynthesisUtterance(sample);
     const voice = voices.find((v) => v.voiceURI === persona.voiceURI);
     if (voice) utterance.voice = voice;
     window.speechSynthesis.cancel();
@@ -157,7 +193,70 @@ export default function SettingsPage() {
           <label className="mb-1 block text-xs font-medium text-white/50">
             Voice (used on calls)
           </label>
-          {voices.length > 0 ? (
+
+          <div className="mb-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => update("ttsProvider", "browser")}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm ${
+                persona.ttsProvider !== "elevenlabs"
+                  ? "bg-imessage-blue text-white"
+                  : "bg-white/10 text-white/60"
+              }`}
+            >
+              Browser (free)
+            </button>
+            <button
+              type="button"
+              onClick={() => update("ttsProvider", "elevenlabs")}
+              className={`flex-1 rounded-lg px-3 py-2 text-sm ${
+                persona.ttsProvider === "elevenlabs"
+                  ? "bg-imessage-blue text-white"
+                  : "bg-white/10 text-white/60"
+              }`}
+            >
+              ElevenLabs (natural)
+            </button>
+          </div>
+
+          {persona.ttsProvider === "elevenlabs" ? (
+            <div className="space-y-2">
+              {elevenLoading && <p className="text-xs text-white/30">Loading voices…</p>}
+              {elevenError && <p className="text-xs text-red-400">{elevenError}</p>}
+              {elevenVoices.length > 0 && (
+                <div className="flex gap-2">
+                  <select
+                    value={persona.elevenlabsVoiceId || ""}
+                    onChange={(e) => update("elevenlabsVoiceId", e.target.value || null)}
+                    className="flex-1 rounded-lg bg-white/10 px-3 py-2 text-[15px] outline-none focus:ring-2 focus:ring-imessage-blue"
+                  >
+                    {elevenVoices.map((v) => {
+                      const tags = [v.gender, v.accent].filter(Boolean).join(", ");
+                      return (
+                        <option key={v.voice_id} value={v.voice_id}>
+                          {v.name}
+                          {tags ? ` (${tags})` : ""}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={testVoice}
+                    disabled={testing}
+                    className="rounded-lg bg-white/10 px-3 py-2 text-sm disabled:opacity-40"
+                  >
+                    {testing ? "…" : "Test"}
+                  </button>
+                </div>
+              )}
+              <p className="text-xs text-white/30">
+                Natural, human-sounding voices via ElevenLabs. Requires an{" "}
+                <code className="text-white/50">ELEVENLABS_API_KEY</code> set on the server
+                (free tier available at elevenlabs.io).
+              </p>
+            </div>
+          ) : voices.length > 0 ? (
             <div className="flex gap-2">
               <select
                 value={persona.voiceURI || ""}
