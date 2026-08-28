@@ -7,6 +7,7 @@ import { DEFAULT_PERSONA } from "../../lib/persona";
 import { loadPersona, savePersona, saveMessages } from "../../lib/storage";
 import { pickBestVoice, sortVoicesByQuality } from "../../lib/voices";
 import { fetchVoices, speakWithElevenLabs } from "../../lib/elevenlabs";
+import { PERSONALITY_PRESETS } from "../../lib/personalities";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -171,6 +172,28 @@ export default function SettingsPage() {
             className="w-full rounded-lg bg-white/10 px-3 py-2 text-[15px] outline-none focus:ring-2 focus:ring-imessage-blue"
             maxLength={40}
           />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-xs font-medium text-white/50">
+            Personality presets
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {PERSONALITY_PRESETS.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                onClick={() => update("bio", preset.bio)}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                  persona.bio === preset.bio
+                    ? "bg-imessage-blue text-white"
+                    : "bg-white/10 text-white/70"
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div>

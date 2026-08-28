@@ -92,6 +92,7 @@ export default function CallPage() {
           return;
         } catch (err) {
           console.error("ElevenLabs playback failed, falling back to browser voice:", err);
+          setError("ElevenLabs voice failed, used browser voice instead: " + (err.message || ""));
         }
       }
       await speakWithBrowser(text);
