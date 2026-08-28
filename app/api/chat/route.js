@@ -1,14 +1,13 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { textingSystemPrompt, callSystemPrompt } from "../../../lib/persona";
 
 export const runtime = "nodejs";
 
-function getClient() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+function getApiKey() {
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY is not set on the server");
+    throw new Error("GEMINI_API_KEY is not set on the server");
   }
-  return new Anthropic({ apiKey });
+  return apiKey;
 }
 
 export async function POST(req) {
@@ -38,32 +37,52 @@ export async function POST(req) {
   }
 
   const system = mode === "call" ? callSystemPrompt(persona) : textingSystemPrompt(persona);
-  const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
-  let client;
+  let apiKey;
   try {
-    client = getClient();
+    apiKey = getApiKey();
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 });
   }
 
-  try {
-    const response = await client.messages.create({
-      model,
-      max_tokens: 400,
-      system,
-      messages: cleanMessages,
-    });
+  const contents = cleanMessages.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
 
-    const text = response.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: system }] },
+          contents,
+          generationConfig: { maxOutputTokens: 400 },
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.error("Gemini API error:", res.status, detail);
+      return Response.json(
+        { error: `Gemini request failed (${res.status})`, detail },
+        { status: 502 }
+      );
+    }
+
+    const data = await res.json();
+    const text = (data.candidates?.[0]?.content?.parts || [])
+      .map((p) => p.text || "")
       .join("\n")
       .trim();
 
     return Response.json({ text });
   } catch (err) {
-    console.error("Anthropic API error:", err);
-    return Response.json({ error: "Failed to reach the model" }, { status: 502 });
+    console.error("Gemini API error:", err);
+    return Response.json({ error: "Failed to reach Gemini" }, { status: 502 });
   }
 }

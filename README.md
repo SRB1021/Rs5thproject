@@ -21,16 +21,17 @@ conversation (audio only — no video).
 
 ```bash
 npm install
-cp .env.example .env.local   # then add your ANTHROPIC_API_KEY and ELEVENLABS_API_KEY
+cp .env.example .env.local   # then add your GEMINI_API_KEY and ELEVENLABS_API_KEY
 npm run dev
 ```
 
-Open http://localhost:3000. Get an Anthropic key at
-https://console.anthropic.com/, and a free ElevenLabs key at
-https://elevenlabs.io/ (Developers → API Keys — make sure the key has
-"Speech to Text" and "Voices" permissions, not just Text to Speech).
+Open http://localhost:3000. Get a free Gemini key at
+https://aistudio.google.com/apikey (sign in with a Google account, no
+credit card required), and a free ElevenLabs key at https://elevenlabs.io/
+(Developers → API Keys — make sure the key has "Speech to Text" and
+"Voices" permissions, not just Text to Speech).
 
-`ANTHROPIC_API_KEY` is required for texting and calling to work at all.
+`GEMINI_API_KEY` is required for texting and calling to work at all.
 `ELEVENLABS_API_KEY` is required for **calling** specifically (it's used to
 transcribe your voice) — texting works fine without it. Once it's set, the
 call voice defaults to the browser's built-in voice; switch to "ElevenLabs
