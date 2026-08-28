@@ -19,6 +19,7 @@ export default function SettingsPage() {
   const [elevenLoading, setElevenLoading] = useState(false);
   const [elevenError, setElevenError] = useState("");
   const [testing, setTesting] = useState(false);
+  const [selectedPresets, setSelectedPresets] = useState([]);
 
   useEffect(() => {
     setPersona(loadPersona(DEFAULT_PERSONA));
@@ -64,6 +65,17 @@ export default function SettingsPage() {
   function update(field, value) {
     setPersona((p) => ({ ...p, [field]: value }));
     setSaved(false);
+  }
+
+  function togglePreset(label) {
+    const next = selectedPresets.includes(label)
+      ? selectedPresets.filter((l) => l !== label)
+      : [...selectedPresets, label];
+    setSelectedPresets(next);
+    const combined = PERSONALITY_PRESETS.filter((p) => next.includes(p.label))
+      .map((p) => p.bio)
+      .join(" ");
+    update("bio", combined);
   }
 
   function handleAvatarChange(e) {
@@ -178,14 +190,17 @@ export default function SettingsPage() {
           <label className="mb-1 block text-xs font-medium text-white/50">
             Personality presets
           </label>
+          <p className="mb-2 text-xs text-white/30">
+            Tap any number to combine them, or write your own below.
+          </p>
           <div className="flex flex-wrap gap-2">
             {PERSONALITY_PRESETS.map((preset) => (
               <button
                 key={preset.label}
                 type="button"
-                onClick={() => update("bio", preset.bio)}
+                onClick={() => togglePreset(preset.label)}
                 className={`rounded-full px-3 py-1.5 text-xs font-medium ${
-                  persona.bio === preset.bio
+                  selectedPresets.includes(preset.label)
                     ? "bg-imessage-blue text-white"
                     : "bg-white/10 text-white/70"
                 }`}
