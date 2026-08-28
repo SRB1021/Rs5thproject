@@ -37,7 +37,7 @@ export async function POST(req) {
   }
 
   const system = mode === "call" ? callSystemPrompt(persona) : textingSystemPrompt(persona);
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const model = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 
   let apiKey;
   try {
