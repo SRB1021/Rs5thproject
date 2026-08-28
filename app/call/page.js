@@ -6,11 +6,14 @@ import { DEFAULT_PERSONA } from "../../lib/persona";
 import { loadPersona, loadMessages, saveMessages } from "../../lib/storage";
 import { fetchReply } from "../../lib/api";
 import { pickBestVoice } from "../../lib/voices";
-import { speakWithElevenLabs } from "../../lib/elevenlabs";
+import { speakWithElevenLabs, transcribeAudio } from "../../lib/elevenlabs";
+import { createRecorder, isRecordingSupported } from "../../lib/recorder";
 
 const STATUS = {
   IDLE: "idle",
-  LISTENING: "listening",
+  READY: "ready", // call active, waiting for the user to hold the talk button
+  RECORDING: "recording",
+  TRANSCRIBING: "transcribing",
   THINKING: "thinking",
   SPEAKING: "speaking",
   ENDED: "ended",
@@ -33,14 +36,12 @@ export default function CallPage() {
   const [error, setError] = useState("");
   const [transcriptLine, setTranscriptLine] = useState("");
   const [elapsed, setElapsed] = useState(0);
-  const [muted, setMuted] = useState(false);
 
   const historyRef = useRef([]);
-  const recognitionRef = useRef(null);
-  const mutedRef = useRef(false);
   const activeRef = useRef(false);
   const timerRef = useRef(null);
   const voicesRef = useRef([]);
+  const recorderRef = useRef(null);
 
   useEffect(() => {
     setPersona(loadPersona(DEFAULT_PERSONA));
@@ -48,16 +49,12 @@ export default function CallPage() {
   }, []);
 
   useEffect(() => {
-    mutedRef.current = muted;
-  }, [muted]);
-
-  useEffect(() => {
     if (typeof window === "undefined") return;
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition || !("speechSynthesis" in window)) {
+    if (!isRecordingSupported() || !("speechSynthesis" in window)) {
       setSupported(false);
       return;
     }
+    recorderRef.current = createRecorder();
 
     function loadVoices() {
       voicesRef.current = window.speechSynthesis.getVoices();
@@ -102,86 +99,24 @@ export default function CallPage() {
     [persona.ttsProvider, persona.elevenlabsVoiceId, speakWithBrowser]
   );
 
-  const listenOnce = useCallback(() => {
-    return new Promise((resolve) => {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
-      recognitionRef.current = recognition;
-      recognition.lang = "en-US";
-      recognition.interimResults = true;
-      recognition.continuous = false;
-
-      let finalText = "";
-
-      recognition.onresult = (event) => {
-        let interim = "";
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const chunk = event.results[i][0].transcript;
-          if (event.results[i].isFinal) finalText += chunk;
-          else interim += chunk;
-        }
-        setTranscriptLine((finalText + interim).trim());
-      };
-
-      recognition.onend = () => resolve(finalText.trim());
-      recognition.onerror = () => resolve(finalText.trim());
-
-      try {
-        recognition.start();
-      } catch {
-        resolve("");
-      }
-    });
-  }, []);
-
-  const runLoop = useCallback(async () => {
-    while (activeRef.current) {
-      setStatus(STATUS.LISTENING);
-      setTranscriptLine("");
-      const said = await listenOnce();
-      if (!activeRef.current) break;
-
-      if (!said || mutedRef.current) {
-        continue;
-      }
-
-      const next = [...historyRef.current, { role: "user", content: said }];
-      historyRef.current = next;
-      saveMessages(next);
-
-      setStatus(STATUS.THINKING);
-      let reply = "";
-      try {
-        reply = await fetchReply({ messages: next, persona, mode: "call" });
-      } catch (err) {
-        setError(err.message || "Something went wrong");
-        break;
-      }
-      if (!activeRef.current) break;
-
-      const withReply = [...historyRef.current, { role: "assistant", content: reply }];
-      historyRef.current = withReply;
-      saveMessages(withReply);
-
-      setStatus(STATUS.SPEAKING);
-      setTranscriptLine(reply);
-      await speak(reply);
-    }
-  }, [listenOnce, persona, speak]);
-
-  function startCall() {
+  async function startCall() {
     setError("");
+    try {
+      await recorderRef.current.requestPermission();
+    } catch (err) {
+      setError("Microphone access is needed for calls. " + (err.message || ""));
+      return;
+    }
     activeRef.current = true;
-    setStatus(STATUS.LISTENING);
+    setStatus(STATUS.READY);
     setElapsed(0);
     timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
-    runLoop();
   }
 
   function endCall() {
     activeRef.current = false;
-    recognitionRef.current?.stop();
     window.speechSynthesis?.cancel();
+    recorderRef.current?.release();
     clearInterval(timerRef.current);
     setStatus(STATUS.ENDED);
   }
@@ -189,20 +124,91 @@ export default function CallPage() {
   useEffect(() => {
     return () => {
       activeRef.current = false;
-      recognitionRef.current?.stop();
+      recorderRef.current?.release();
       if (typeof window !== "undefined") window.speechSynthesis?.cancel();
       clearInterval(timerRef.current);
     };
   }, []);
 
+  async function handleTalkStart() {
+    if (status !== STATUS.READY) return;
+    setError("");
+    setTranscriptLine("");
+    try {
+      await recorderRef.current.start();
+      setStatus(STATUS.RECORDING);
+    } catch (err) {
+      setError("Couldn't start recording. " + (err.message || ""));
+    }
+  }
+
+  async function handleTalkEnd() {
+    if (status !== STATUS.RECORDING) return;
+
+    setStatus(STATUS.TRANSCRIBING);
+    let blob;
+    try {
+      blob = await recorderRef.current.stop();
+    } catch (err) {
+      setError(err.message || "Recording failed");
+      setStatus(STATUS.READY);
+      return;
+    }
+
+    let said = "";
+    try {
+      said = await transcribeAudio(blob);
+    } catch (err) {
+      setError(err.message || "Transcription failed");
+      setStatus(STATUS.READY);
+      return;
+    }
+
+    if (!activeRef.current) return;
+    if (!said.trim()) {
+      setStatus(STATUS.READY);
+      return;
+    }
+    setTranscriptLine(said);
+
+    const next = [...historyRef.current, { role: "user", content: said }];
+    historyRef.current = next;
+    saveMessages(next);
+
+    setStatus(STATUS.THINKING);
+    let reply = "";
+    try {
+      reply = await fetchReply({ messages: next, persona, mode: "call" });
+    } catch (err) {
+      setError(err.message || "Something went wrong");
+      setStatus(STATUS.READY);
+      return;
+    }
+    if (!activeRef.current) return;
+
+    const withReply = [...historyRef.current, { role: "assistant", content: reply }];
+    historyRef.current = withReply;
+    saveMessages(withReply);
+
+    setStatus(STATUS.SPEAKING);
+    setTranscriptLine(reply);
+    await speak(reply);
+    if (activeRef.current) setStatus(STATUS.READY);
+  }
+
   const statusLabel =
     {
       [STATUS.IDLE]: "Ready to call",
-      [STATUS.LISTENING]: "Listening…",
+      [STATUS.READY]: "Hold the button to talk",
+      [STATUS.RECORDING]: "Listening… release when done",
+      [STATUS.TRANSCRIBING]: "…",
       [STATUS.THINKING]: "…",
       [STATUS.SPEAKING]: `${persona.name} is talking…`,
       [STATUS.ENDED]: "Call ended",
     }[status] || "";
+
+  const inCall = status !== STATUS.IDLE && status !== STATUS.ENDED;
+  const busy = status === STATUS.TRANSCRIBING || status === STATUS.THINKING || status === STATUS.SPEAKING;
 
   return (
     <div className="mx-auto flex h-screen max-w-lg flex-col items-center justify-between bg-gradient-to-b from-fuchsia-900 via-indigo-900 to-slate-950 px-6 py-10">
@@ -214,7 +220,7 @@ export default function CallPage() {
 
       <div className="flex flex-col items-center gap-4">
         <div className="relative flex h-32 w-32 items-center justify-center">
-          {status === STATUS.LISTENING && (
+          {status === STATUS.RECORDING && (
             <span className="absolute inset-0 rounded-full bg-green-500/40 animate-pulseRing" />
           )}
           {status === STATUS.SPEAKING && (
@@ -235,23 +241,21 @@ export default function CallPage() {
         </div>
         <div className="text-xl font-semibold">{persona.name}</div>
         <div className="text-sm text-white/50">{statusLabel}</div>
-        {activeRef.current && (
-          <div className="text-xs text-white/30">{formatDuration(elapsed)}</div>
-        )}
+        {inCall && <div className="text-xs text-white/30">{formatDuration(elapsed)}</div>}
         {transcriptLine && (
           <p className="max-w-xs text-center text-sm text-white/70">{transcriptLine}</p>
         )}
         {error && <p className="max-w-xs text-center text-sm text-red-400">{error}</p>}
         {!supported && (
           <p className="max-w-xs text-center text-sm text-yellow-400">
-            Voice calling needs browser speech support (works best in Chrome/Edge on
-            desktop/Android). Your browser doesn't support it — you can still text instead.
+            Voice calling needs microphone and audio support, which this browser doesn't
+            provide — you can still text instead.
           </p>
         )}
       </div>
 
-      <div className="flex items-center gap-8 pb-6">
-        {status === STATUS.IDLE || status === STATUS.ENDED ? (
+      <div className="flex flex-col items-center gap-4 pb-6">
+        {!inCall ? (
           <button
             onClick={startCall}
             disabled={!supported}
@@ -263,17 +267,20 @@ export default function CallPage() {
         ) : (
           <>
             <button
-              onClick={() => setMuted((m) => !m)}
-              className={`flex h-14 w-14 items-center justify-center rounded-full text-xl ${
-                muted ? "bg-yellow-500" : "bg-white/10"
+              onPointerDown={handleTalkStart}
+              onPointerUp={handleTalkEnd}
+              onPointerLeave={() => status === STATUS.RECORDING && handleTalkEnd()}
+              disabled={busy}
+              className={`flex h-24 w-24 select-none items-center justify-center rounded-full text-3xl transition-colors disabled:opacity-30 ${
+                status === STATUS.RECORDING ? "bg-green-500" : "bg-white/10"
               }`}
-              aria-label="Toggle mute"
+              aria-label="Hold to talk"
             >
-              {muted ? "🔇" : "🎙️"}
+              🎙️
             </button>
             <button
               onClick={endCall}
-              className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 text-2xl"
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500 text-xl"
               aria-label="End call"
             >
               ✕
