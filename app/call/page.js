@@ -6,7 +6,7 @@ import { DEFAULT_PERSONA } from "../../lib/persona";
 import { loadPersona, loadMessages, saveMessages } from "../../lib/storage";
 import { fetchReply } from "../../lib/api";
 import { pickBestVoice } from "../../lib/voices";
-import { speakWithElevenLabs, transcribeAudio } from "../../lib/elevenlabs";
+import { speakWithElevenLabs, transcribeAudio, unlockAudioElement } from "../../lib/elevenlabs";
 import { createRecorder, isRecordingSupported } from "../../lib/recorder";
 
 const STATUS = {
@@ -42,6 +42,7 @@ export default function CallPage() {
   const timerRef = useRef(null);
   const voicesRef = useRef([]);
   const recorderRef = useRef(null);
+  const audioElRef = useRef(null);
 
   useEffect(() => {
     setPersona(loadPersona(DEFAULT_PERSONA));
@@ -88,7 +89,7 @@ export default function CallPage() {
     async (text) => {
       if (persona.ttsProvider === "elevenlabs" && persona.elevenlabsVoiceId) {
         try {
-          await speakWithElevenLabs(text, persona.elevenlabsVoiceId);
+          await speakWithElevenLabs(text, persona.elevenlabsVoiceId, audioElRef.current);
           return;
         } catch (err) {
           console.error("ElevenLabs playback failed, falling back to browser voice:", err);
@@ -108,6 +109,8 @@ export default function CallPage() {
       setError("Microphone access is needed for calls. " + (err.message || ""));
       return;
     }
+    if (!audioElRef.current) audioElRef.current = new Audio();
+    await unlockAudioElement(audioElRef.current);
     activeRef.current = true;
     setStatus(STATUS.READY);
     setElapsed(0);
@@ -117,6 +120,7 @@ export default function CallPage() {
   function endCall() {
     activeRef.current = false;
     window.speechSynthesis?.cancel();
+    audioElRef.current?.pause();
     recorderRef.current?.release();
     clearInterval(timerRef.current);
     setStatus(STATUS.ENDED);
